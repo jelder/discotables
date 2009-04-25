@@ -20,8 +20,7 @@ my $table = 'solr-wiffiti';
 my $announce = '239.0.0.1';
 my $port = '1969';
 my $skew = 10;
-my $age = 10;
-my $refresh = 3;
+my $age = 3;
 
 GetOptions(
     'key=s' => \$key,
@@ -45,7 +44,7 @@ sub refresh_tables () {
         my @command = qq(pfctl -t $table -T replace @clients);
         system(@command);
     }
-    alarm $refresh;
+    alarm $age;
 }
 
 my $cipher = Crypt::CBC->new(
@@ -59,9 +58,9 @@ my $socket = IO::Socket::Multicast->new(
 $socket->mcast_loopback(0);
 $socket->mcast_add($announce);
 
-# Wake up every $refresh seconds to refresh the tables.
+# Wake up every $age seconds to refresh the tables.
 local $SIG{ALRM} = \&refresh_tables;
-alarm $refresh;
+alarm $age;
 
 while (1) {
     # Grab a frame from the wire and record the receipt time.
