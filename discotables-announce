@@ -8,7 +8,6 @@ use Crypt::CBC;
 use File::Basename;
 use English '-no_match_vars';
 use Sys::Hostname;
-use Data::Dumper;
 use Sys::Syslog qw( :standard :macros setlogsock );
 
 openlog basename $0, "ndelay,nowaitpid", LOG_DAEMON or die $!;
@@ -17,7 +16,7 @@ setlogsock 'unix'; # Required on OpenBSD
 my $key = 'Mu9peiph';
 my $interval = 3;
 my $table = 'solr-wiffiti';
-my $announce = '225.19.79.0:1969';
+my $announce = '239.0.0.1:1969';
 my $client = hostname;
 
 GetOptions(
@@ -40,15 +39,18 @@ my $cipher = Crypt::CBC->new(
 );
 
 my $socket = IO::Socket::Multicast->new();
+$socket->mcast_ttl(1);
 
 while (1) {
-    my @fields = (pack('L',time), $table,$client);
+    my @fields = (
+        pack('L',time),
+        $table,
+        $client
+    );
     my $frame = join(pack('c',0),@fields);
-    print $frame,"\n";
-    $socket->mcast_send(
-        $cipher->encrypt($frame),
-        $announce
-    ) or warn $!;
+    $frame = $cipher->encrypt($frame),
+    $socket->mcast_send($frame, $announce)
+        or warn $!;
 } continue {
     sleep $interval;
 }

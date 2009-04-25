@@ -8,7 +8,6 @@ use Crypt::CBC;
 use File::Basename;
 use English '-no_match_vars';
 use Sys::Syslog qw( :standard :macros setlogsock );
-use Data::Dumper;
 
 $|++;
 
@@ -18,7 +17,7 @@ setlogsock 'unix'; # Required on OpenBSD
 my $key = 'Mu9peiph';
 my $interval = 1;
 my $table = 'solr-wiffiti';
-my $announce = '225.19.79.0';
+my $announce = '239.0.0.1';
 my $port = '1969';
 my $skew = 10;
 my $age = 10;
@@ -45,8 +44,6 @@ sub refresh_tables () {
         }
         my @command = qq(pfctl -t $table -T replace @clients);
         system(@command);
-        print Dumper \%discovered;
-        print "\n";
     }
     alarm $refresh;
 }
@@ -70,13 +67,18 @@ while (1) {
     # Grab a frame from the wire and record the receipt time.
     my $frame;
     $socket->recv($frame,1024);
+    next unless $frame =~ /^Salted__/;
     my $time_received = time;
 
     # Decrypt using pre-shared key
-    $frame = $cipher->decrypt($frame) or next;
+    eval { $frame = $cipher->decrypt($frame) };
+    if ($@) {
+        warn $@;
+        next;
+    }
 
     # The frame is made up of time sent, table name, and client.
-    my ($timestamp,$table,$client) = split(pack('c',0),$frame);
+    my ($timestamp,$table,$client) = split(pack('c',0),$frame) or next;
     $timestamp = unpack('L',$timestamp);
     $client = join('.',unpack( "C4", $client)); 
 
