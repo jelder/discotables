@@ -1,0 +1,55 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+use Getopt::Long;
+use IO::Socket::Multicast;
+use Crypt::CBC;
+use File::Basename;
+use English '-no_match_vars';
+use Sys::Hostname;
+use Data::Dumper;
+use Sys::Syslog qw( :standard :macros setlogsock );
+
+openlog basename $0, "ndelay,nowaitpid", LOG_DAEMON or die $!;
+setlogsock 'unix'; # Required on OpenBSD
+
+my $key = 'Mu9peiph';
+my $interval = 3;
+my $table = 'solr-wiffiti';
+my $announce = '225.19.79.0:1969';
+my $client = hostname;
+
+GetOptions(
+    'key=s' => \$key,
+    'interval=n' => \$interval,
+    'table=s' => \$table,
+    'client=s' => \$client,
+    'announce=s' => \$announce,
+) or die $!;
+
+if ($client =~ /\w/) {
+    $client = gethostbyname($client); 
+} else {
+    $client = pack("C4", split /\./, $client); 
+}
+
+my $cipher = Crypt::CBC->new(
+    -key    => $key, 
+    -cipher => 'Blowfish'
+);
+
+my $socket = IO::Socket::Multicast->new();
+
+while (1) {
+    my @fields = (pack('L',time), $table,$client);
+    my $frame = join(pack('c',0),@fields);
+    print $frame,"\n";
+    $socket->mcast_send(
+        $cipher->encrypt($frame),
+        $announce
+    ) or warn $!;
+} continue {
+    sleep $interval;
+}
+

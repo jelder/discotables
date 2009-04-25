@@ -1,0 +1,92 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+use Getopt::Long;
+use IO::Socket::Multicast;
+use Crypt::CBC;
+use File::Basename;
+use English '-no_match_vars';
+use Sys::Syslog qw( :standard :macros setlogsock );
+use Data::Dumper;
+
+$|++;
+
+openlog basename $0, "ndelay,nowaitpid", LOG_DAEMON or die $!;
+setlogsock 'unix'; # Required on OpenBSD
+
+my $key = 'Mu9peiph';
+my $interval = 1;
+my $table = 'solr-wiffiti';
+my $announce = '225.19.79.0';
+my $port = '1969';
+my $skew = 10;
+my $age = 10;
+my $refresh = 3;
+
+GetOptions(
+    'key=s' => \$key,
+    'interval=n' => \$interval,
+    'table=s' => \$table,
+    'announce=s' => \$announce
+) or die $!;
+
+my %discovered;
+
+sub refresh_tables () {
+    for my $table (keys %discovered) {
+        my @clients;
+        for my $client (keys %{ $discovered{$table} } ) {
+            if ($discovered{$table}->{$client} >= time - $age) {
+                push @clients, $client;
+            } else {
+                delete $discovered{$table}->{$client};
+            }
+        }
+        my @command = qq(pfctl -t $table -T replace @clients);
+        system(@command);
+        print Dumper \%discovered;
+        print "\n";
+    }
+    alarm $refresh;
+}
+
+my $cipher = Crypt::CBC->new(
+    -key    => $key, 
+    -cipher => 'Blowfish'
+);
+
+my $socket = IO::Socket::Multicast->new(
+    LocalPort => $port,
+);
+$socket->mcast_loopback(0);
+$socket->mcast_add($announce);
+
+# Wake up every $refresh seconds to refresh the tables.
+local $SIG{ALRM} = \&refresh_tables;
+alarm $refresh;
+
+while (1) {
+    # Grab a frame from the wire and record the receipt time.
+    my $frame;
+    $socket->recv($frame,1024);
+    my $time_received = time;
+
+    # Decrypt using pre-shared key
+    $frame = $cipher->decrypt($frame) or next;
+
+    # The frame is made up of time sent, table name, and client.
+    my ($timestamp,$table,$client) = split(pack('c',0),$frame);
+    $timestamp = unpack('L',$timestamp);
+    $client = join('.',unpack( "C4", $client)); 
+
+    # Timestamp outside of allowed skew indicates replay attack 
+    # or broken client. You're running NTP anyway, right?
+    if ($timestamp - $skew >= $time_received &&
+        $timestamp + $skew <= $time_received ){
+        syslog(LOG_ERR, "$client: forgery or configuration problem");
+        next;
+    }
+    $discovered{$table}->{$client} = $timestamp;
+}
+
