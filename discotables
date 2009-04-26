@@ -107,6 +107,7 @@ while (1) {
     ($table) = ($table =~ /([a-z0-9_-]+)/i);
     unless (grep { $_ eq $table} @tables) {
         syslog(LOG_ERR, "$source: $table is not allowed");
+        next;
     }
     
     # TODO: $server sanity checking. 
