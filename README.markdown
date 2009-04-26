@@ -5,8 +5,8 @@ DiscoTables (&lt;tables&gt; via multicast discovery) presents method for automat
 
 This simplifies two common usecases for your operations team. Both of these tasks can now be completed on ''all'' of your load balancers instantly, without logging in.
 
-# Adding a new server to a load balanced pool is automatic. Depending on your environment, it could be as simple as cloning a VM.
-# Removing a server from production for maintenance. 
+* Adding a new server to a load balanced pool is automatic. Depending on your environment, it could be as simple as cloning a VM.
+* Removing a server from production for maintenance. 
 
 A DiscoTables server runs on each of your firewalls (because, naturally, you're already running pfsync, carp and maybe even bgpd). Clients such as web servers, message brokers, etc. run clients which announce their presence to the servers. It is assumed that your relayd.conf already knows how to judge the health of your servers. 
 
