@@ -3,7 +3,7 @@ DiscoTables
 
 DiscoTables (&lt;tables&gt; via multicast discovery) presents method for automatic OpenBSD pf table updates.
 
-This simplifies two common usecases for your operations team. Both of these tasks can now be completed on ''all'' of your load balancers instantly, without logging in.
+This simplifies two common usecases for your operations team. Both of these tasks can now be completed on *all* of your load balancers instantly, without logging in.
 
 * Adding a new server to a load balanced pool is automatic. Depending on your environment, it could be as simple as cloning a VM.
 * Removing a server from production for maintenance. 
