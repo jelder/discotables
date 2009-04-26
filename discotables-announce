@@ -31,6 +31,9 @@ GetOptions(
     'iface=s' => \$iface,
 ) or die $!;
 
+# User left it blank, so guess.
+$address = hostname unless $address;
+
 if ($address =~ /\w/) {
     $address = join('.',unpack( "C4", gethostbyname($address))); 
 }
