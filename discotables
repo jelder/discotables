@@ -13,45 +13,59 @@ openlog basename $0, "ndelay,console,nowaitpid", LOG_DAEMON or die $!;
 setlogsock 'unix'; # Required on OpenBSD
 
 my $key = '';
-my $interval = 1;
-my $table = '';
+my @tables = ();
 my $announce = '239.0.0.1';
 my $port = '49153';
 my $skew = 10;
-my $age = 1;
+my $age = 10;
 
 GetOptions(
-    'key=s' => \$key,
-    'interval=n' => \$interval,
-    'table=s' => \$table,
-    'announce=s' => \$announce
+    'k|key=s' => \$key,
+    't|tables=s' => \@tables,
+    'age=s' => \$age,
+    'announce=s' => \$announce,
+    'port=s' => \$port,
 ) or die $!;
 
-my %discovered;
+die "--tables is required" unless @tables;
+die "--key is required" unless $key; 
 
+# @tables is a whitelist of tables we allow to be updated via this mechanism.
+@tables = split(/,/,join(',',@tables));
+
+# %discovered is our main data structure.
+# Table << IP < Time
+my %discovered;
+ 
 sub refresh_tables () {
     for my $table (keys %discovered) {
-        my @clients;
-        for my $client (keys %{ $discovered{$table} } ) {
-            if ($discovered{$table}->{$client} >= time - $age) {
-                push @clients, $client;
+        my @ip;
+        for my $ip (keys %{ $discovered{$table} } ) {
+            if ($discovered{$table}->{$ip} >= time - $age) {
+                push @ip, $ip;
             } else {
-                delete $discovered{$table}->{$client};
+                delete $discovered{$table}->{$ip};
             }
         }
-        syslog(LOG_INFO, "table <$table> { " . join(' ',@clients) . ' }');
-        my @command = qq(pfctl -t $table -T replace @clients);
+
+        # Log the appopriate pfctl command, then run it.
+        syslog(LOG_INFO, "table <$table> { " . join(' ',@ip) . ' }');
+        my @command = qq(pfctl -t $table -T replace @ip);
         system(@command);
-        delete $discovered{$table} unless @clients;
+
+        # Delete the table record if @ip is empty so next iteration will be a no-op. 
+        delete $discovered{$table} unless @ip;
     }
     alarm $age;
 }
 
+# Set up our cipher
 my $cipher = Crypt::CBC->new(
     -key    => $key, 
     -cipher => 'Blowfish'
 );
 
+# Set up our multicast listener
 my $socket = IO::Socket::Multicast->new(
     LocalPort => $port,
     ReuseAddr => 1,
