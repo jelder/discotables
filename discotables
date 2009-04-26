@@ -9,8 +9,8 @@ use File::Basename;
 use English '-no_match_vars';
 use Sys::Syslog qw( :standard :macros setlogsock );
 
-$0 = basename $0;
-openlog $0, "ndelay,console,nowaitpid", LOG_DAEMON or die $!;
+$PROGRAM_NAME = basename $PROGRAM_NAME;
+openlog $PROGRAM_NAME, "ndelay,console,nowaitpid", LOG_DAEMON or die $!;
 setlogsock 'unix'; # Required on OpenBSD
 
 my $key = '';
@@ -35,7 +35,7 @@ die "--key is required" unless $key;
 @tables = split(/,/,join(',',@tables));
 
 # Don't show key in process title.
-$0 .= " $announce:$port " . join(' ', @tables);
+$PROGRAM_NAME .= " $announce:$port " . join(' ', @tables);
 
 # %discovered is our main data structure.
 # Table << IP < Time

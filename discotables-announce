@@ -10,8 +10,8 @@ use English '-no_match_vars';
 use Sys::Hostname;
 use Sys::Syslog qw( :standard :macros setlogsock );
 
-$0 = basename $0;
-openlog $0, "ndelay,nowaitpid", LOG_DAEMON or die $!;
+$PROGRAM_NAME = basename $PROGRAM_NAME;
+openlog $PROGRAM_NAME, "ndelay,nowaitpid", LOG_DAEMON or die $!;
 setlogsock 'unix';
 
 my $key = '';
@@ -42,7 +42,7 @@ die "--table is required" unless $table;
 die "--key is required" unless $key;
 
 # Don't show key in process title.
-$0 .= " $announce:$port $table"; 
+$PROGRAM_NAME .= " $announce:$port $table"; 
 
 my $cipher = Crypt::CBC->new(
     -key    => $key, 
