@@ -20,9 +20,11 @@ Roadmap
 ------
 
 Before release:
+
 * Current design only works against pfctl tables, not relayd. Final version will work against nginx, relayd, or any thingthing with an include statement in the configuration syntax and a graceful reload method. 
 
 Nice to have:
+
 * Directly support ActiveMQ's announcements. Zero security, but could be useful under the right circumstances.
 * Need to write some --help text.
 
