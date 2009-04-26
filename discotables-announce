@@ -20,16 +20,23 @@ my $table = '';
 my $announce = '239.0.0.1';
 my $port = '49153';
 my $iface;
+my $address = '';
 
 GetOptions(
     'key=s' => \$key,
     'interval=n' => \$interval,
     'table=s' => \$table,
     'announce=s' => \$announce,
+    'address=s' => \$address,
     'iface=s' => \$iface,
 ) or die $!;
 
-die unless $key;
+if ($address =~ /\w/) {
+    $address = join('.',unpack( "C4", gethostbyname($address))); 
+}
+
+die "--table is required" unless $table;
+die "--key is required" unless $key;
 
 my $cipher = Crypt::CBC->new(
     -key    => $key, 
@@ -45,6 +52,7 @@ while (1) {
     my @frame = (
         time,
         $table,
+        $address
     );
     my $frame = join(' ',@frame);
     $frame = $cipher->encrypt($frame);
