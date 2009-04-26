@@ -52,6 +52,8 @@ sub refresh_tables () {
             }
         }
 
+        # Always check your assumptions: relayd's tables aren't modifiable through pfclt, and realyctl is weak in this regard. Working on a new design using templates and include statements that will cover both relayd and nginx.
+    
         # Log the appopriate pfctl command, then run it.
         syslog(LOG_INFO, "table <$table> { " . join(' ',@ip) . ' }');
         my @command = qq(pfctl -t $table -T replace @ip);

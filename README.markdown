@@ -14,13 +14,16 @@ All communication is encrypted with Blowfish and a relies on a pre-shared key.
 Environment
 -----------
 
-The `discotables` server is only intended to work in conjunction with OpenBSD's pfctl, but could in theory be extended to work with other load balancers. The `discotables-announce` client is tested on Ubuntu, Mac OS X, and OpenBSD.
+Developed and tested on Ubuntu, Mac OS X, and OpenBSD. Needs a modern Perl and not much else.
 
-TODO
-----
+Roadmap
+------
 
+Before release:
+* Current design only works against pfctl tables, not relayd. Final version will work against nginx, relayd, or any thingthing with an include statement in the configuration syntax and a graceful reload method. 
+
+Nice to have:
 * Directly support ActiveMQ's announcements. Zero security, but could be useful under the right circumstances.
-* Need a way to configure 3rd party scripts for updating other load balancers, such as NginX fair-upstream. 
 * Need to write some --help text.
 
 Dependencies
