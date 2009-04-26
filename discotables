@@ -80,40 +80,41 @@ while (1) {
     # Grab a frame from the wire
     my $frame;
     next unless $socket->recv($frame,1024);
-    next unless $frame =~ /^Salted__/;
-
-    # Record the receipt time and client IP.
-    my $time_received = time;
-    my $client = join('.',unpack( "C4", $socket->peeraddr));
+    my $source = join('.',unpack( "C4", $socket->peeraddr));
 
     # Decrypt using pre-shared key
     eval {
         $frame = $cipher->decrypt($frame);
+        # Protocol is plain text, so use that to detect failed decryption.
         die "incorrect key\n" unless
-            $frame =~ /^[ 0-9a-z_-]+$/io;
+            $frame =~ /^[ .0-9a-z_-]+$/io;
     };
     if ($@) {
-        print "$frame $@";
-        syslog(LOG_ERR, "$client: $@");
+        # Decrypt failed, log an error with the source IP.
+        syslog(LOG_ERR, "$source: $@");
         next;
     }
 
-    # Frame consists of packed:
-    #  protocol version  
-    #  timestamp
-    #  table name
-    my ($timestamp, $table)
-        = split(' ',$frame,2);
+    # Maybe I should use a real serializer here, but this works.
+    my ($time_sent, $table, $server)
+        = split(' ', $frame, 3);
+
+    # Sanity checks on table names.
     ($table) = ($table =~ /([a-z0-9_-]+)/i);
+    unless (grep { $_ eq $table} @tables) {
+        syslog(LOG_ERR, "$source: $table is not allowed");
+    }
+    
+    # TODO: $server sanity checking. 
 
     # Timestamp outside of allowed skew indicates replay attack 
-    # or broken client. You're running NTP anyway, right?
-    if ($timestamp - $skew >= $time_received &&
-        $timestamp + $skew <= $time_received ){
-        syslog(LOG_ERR, "$client: forgery or configuration problem");
+    # or broken client. 
+    if ($time_sent - $skew >= time &&
+        $time_sent + $skew <= time ){
+        syslog(LOG_ERR, "$source: forgery or configuration problem");
         next;
     }
 
-    $discovered{$table}->{$client} = $time_received; 
+    $discovered{$table}->{$server} = time; 
 }
 
