@@ -47,7 +47,6 @@ while (1) {
         $table,
     );
     my $frame = join(' ',@frame);
-    print "$frame\n";
     $frame = $cipher->encrypt($frame);
     $socket->mcast_send($frame, $announce . ':' . $port)
         or warn $!;
