@@ -9,18 +9,16 @@ use File::Basename;
 use English '-no_match_vars';
 use Sys::Syslog qw( :standard :macros setlogsock );
 
-$|++;
-
-openlog basename $0, "ndelay,nowaitpid", LOG_DAEMON or die $!;
+openlog basename $0, "ndelay,console,nowaitpid", LOG_DAEMON or die $!;
 setlogsock 'unix'; # Required on OpenBSD
 
-my $key = 'Mu9peiph';
+my $key = '';
 my $interval = 1;
-my $table = 'solr-wiffiti';
+my $table = '';
 my $announce = '239.0.0.1';
-my $port = '1969';
+my $port = '49153';
 my $skew = 10;
-my $age = 3;
+my $age = 1;
 
 GetOptions(
     'key=s' => \$key,
@@ -41,8 +39,10 @@ sub refresh_tables () {
                 delete $discovered{$table}->{$client};
             }
         }
+        syslog(LOG_INFO, "table <$table> { " . join(' ',@clients) . ' }');
         my @command = qq(pfctl -t $table -T replace @clients);
         system(@command);
+        delete $discovered{$table} unless @clients;
     }
     alarm $age;
 }
@@ -54,8 +54,8 @@ my $cipher = Crypt::CBC->new(
 
 my $socket = IO::Socket::Multicast->new(
     LocalPort => $port,
-);
-$socket->mcast_loopback(0);
+    ReuseAddr => 1,
+) or die $!;
 $socket->mcast_add($announce);
 
 # Wake up every $age seconds to refresh the tables.
@@ -63,23 +63,34 @@ local $SIG{ALRM} = \&refresh_tables;
 alarm $age;
 
 while (1) {
-    # Grab a frame from the wire and record the receipt time.
+    # Grab a frame from the wire
     my $frame;
-    $socket->recv($frame,1024);
+    next unless $socket->recv($frame,1024);
     next unless $frame =~ /^Salted__/;
+
+    # Record the receipt time and client IP.
     my $time_received = time;
+    my $client = join('.',unpack( "C4", $socket->peeraddr));
 
     # Decrypt using pre-shared key
-    eval { $frame = $cipher->decrypt($frame) };
+    eval {
+        $frame = $cipher->decrypt($frame);
+        die "incorrect key\n" unless
+            $frame =~ /^[ 0-9a-z_-]+$/io;
+    };
     if ($@) {
-        warn $@;
+        print "$frame $@";
+        syslog(LOG_ERR, "$client: $@");
         next;
     }
 
-    # The frame is made up of time sent, table name, and client.
-    my ($timestamp,$table,$client) = split(pack('c',0),$frame) or next;
-    $timestamp = unpack('L',$timestamp);
-    $client = join('.',unpack( "C4", $client)); 
+    # Frame consists of packed:
+    #  protocol version  
+    #  timestamp
+    #  table name
+    my ($timestamp, $table)
+        = split(' ',$frame,2);
+    ($table) = ($table =~ /([a-z0-9_-]+)/i);
 
     # Timestamp outside of allowed skew indicates replay attack 
     # or broken client. You're running NTP anyway, right?
@@ -89,7 +100,6 @@ while (1) {
         next;
     }
 
-    # Save $time_received instead of $timestamp to avoid clock skew checks later.
     $discovered{$table}->{$client} = $time_received; 
 }
 

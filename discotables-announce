@@ -10,28 +10,26 @@ use English '-no_match_vars';
 use Sys::Hostname;
 use Sys::Syslog qw( :standard :macros setlogsock );
 
-openlog basename $0, "ndelay,nowaitpid", LOG_DAEMON or die $!;
-setlogsock 'unix'; # Required on OpenBSD
+$0 = basename $0;
+openlog $0, "ndelay,nowaitpid", LOG_DAEMON or die $!;
+setlogsock 'unix';
 
-my $key = 'Mu9peiph';
-my $interval = 3;
-my $table = 'solr-wiffiti';
-my $announce = '239.0.0.1:1969';
-my $client = hostname;
+my $key = '';
+my $interval = 1;
+my $table = '';
+my $announce = '239.0.0.1';
+my $port = '49153';
+my $iface;
 
 GetOptions(
     'key=s' => \$key,
     'interval=n' => \$interval,
     'table=s' => \$table,
-    'client=s' => \$client,
     'announce=s' => \$announce,
+    'iface=s' => \$iface,
 ) or die $!;
 
-if ($client =~ /\w/) {
-    $client = gethostbyname($client); 
-} else {
-    $client = pack("C4", split /\./, $client); 
-}
+die unless $key;
 
 my $cipher = Crypt::CBC->new(
     -key    => $key, 
@@ -39,17 +37,19 @@ my $cipher = Crypt::CBC->new(
 );
 
 my $socket = IO::Socket::Multicast->new();
+$socket->mcast_if($iface) if $iface;
 $socket->mcast_ttl(1);
+$socket->mcast_loopback(0);
 
 while (1) {
-    my @fields = (
-        pack('L',time),
+    my @frame = (
+        time,
         $table,
-        $client
     );
-    my $frame = join(pack('c',0),@fields);
-    $frame = $cipher->encrypt($frame),
-    $socket->mcast_send($frame, $announce)
+    my $frame = join(' ',@frame);
+    print "$frame\n";
+    $frame = $cipher->encrypt($frame);
+    $socket->mcast_send($frame, $announce . ':' . $port)
         or warn $!;
 } continue {
     sleep $interval;
