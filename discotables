@@ -9,7 +9,8 @@ use File::Basename;
 use English '-no_match_vars';
 use Sys::Syslog qw( :standard :macros setlogsock );
 
-openlog basename $0, "ndelay,console,nowaitpid", LOG_DAEMON or die $!;
+$0 = basename $0;
+openlog $0, "ndelay,console,nowaitpid", LOG_DAEMON or die $!;
 setlogsock 'unix'; # Required on OpenBSD
 
 my $key = '';
@@ -32,6 +33,9 @@ die "--key is required" unless $key;
 
 # @tables is a whitelist of tables we allow to be updated via this mechanism.
 @tables = split(/,/,join(',',@tables));
+
+# Don't show key in process title.
+$0 .= " $announce:$port " . join(' ', @tables);
 
 # %discovered is our main data structure.
 # Table << IP < Time

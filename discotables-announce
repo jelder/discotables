@@ -41,6 +41,9 @@ if ($address =~ /\w/) {
 die "--table is required" unless $table;
 die "--key is required" unless $key;
 
+# Don't show key in process title.
+$0 .= " $announce:$port $table"; 
+
 my $cipher = Crypt::CBC->new(
     -key    => $key, 
     -cipher => 'Blowfish'
