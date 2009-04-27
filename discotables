@@ -28,7 +28,7 @@ GetOptions(
     'age=s' => \$age,
     'announce=s' => \$announce,
     'port=s' => \$port,
-    'debug!' => \$debug;
+    'debug!' => \$debug,
 ) or die $!;
 
 die "--tables is required" unless @tables;
