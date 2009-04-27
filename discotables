@@ -8,6 +8,7 @@ use Crypt::CBC;
 use File::Basename;
 use English '-no_match_vars';
 use Sys::Syslog qw( :standard :macros setlogsock );
+use Data::Dumper;
 
 $PROGRAM_NAME = basename $PROGRAM_NAME;
 openlog $PROGRAM_NAME, "ndelay,console,nowaitpid", LOG_DAEMON or die $!;
@@ -19,6 +20,7 @@ my $announce = '239.0.0.1';
 my $port = '49153';
 my $skew = 10;
 my $age = 10;
+my $debug = 0;
 
 GetOptions(
     'k|key=s' => \$key,
@@ -26,6 +28,7 @@ GetOptions(
     'age=s' => \$age,
     'announce=s' => \$announce,
     'port=s' => \$port,
+    'debug!' => \$debug;
 ) or die $!;
 
 die "--tables is required" unless @tables;
@@ -40,7 +43,13 @@ $PROGRAM_NAME .= " $announce:$port " . join(' ', @tables);
 # %discovered is our main data structure.
 # Table << IP < Time
 my %discovered;
- 
+
+sub _log ($$) {
+    my ($pri,$msg) = @_;
+    syslog($pri,$msg);
+    print STDERR $msg,"\n" if $debug;
+}
+
 sub refresh_tables () {
     for my $table (keys %discovered) {
         my @ip;
@@ -55,7 +64,7 @@ sub refresh_tables () {
         # Always check your assumptions: relayd's tables aren't modifiable through pfclt, and realyctl is weak in this regard. Working on a new design using templates and include statements that will cover both relayd and nginx.
     
         # Log the appopriate pfctl command, then run it.
-        syslog(LOG_INFO, "table <$table> { " . join(' ',@ip) . ' }');
+        _log(LOG_INFO, "table <$table> { " . join(' ',@ip) . ' }');
         my @command = qq(pfctl -t $table -T replace @ip);
         system(@command);
 
@@ -87,6 +96,7 @@ while (1) {
     my $frame;
     next unless $socket->recv($frame,1024);
     my $source = join('.',unpack( "C4", $socket->peeraddr));
+    print length($frame) . " from $source\n";
 
     # Decrypt using pre-shared key
     eval {
@@ -97,7 +107,7 @@ while (1) {
     };
     if ($@) {
         # Decrypt failed, log an error with the source IP.
-        syslog(LOG_ERR, "$source: $@");
+        _log(LOG_ERR, "$source: $@");
         next;
     }
 
@@ -108,7 +118,7 @@ while (1) {
     # Sanity checks on table names.
     ($table) = ($table =~ /([a-z0-9_-]+)/i);
     unless (grep { $_ eq $table} @tables) {
-        syslog(LOG_ERR, "$source: $table is not allowed");
+        _log(LOG_ERR, "$source: $table is not allowed");
         next;
     }
     
@@ -118,7 +128,7 @@ while (1) {
     # or broken client. 
     if ($time_sent - $skew >= time &&
         $time_sent + $skew <= time ){
-        syslog(LOG_ERR, "$source: forgery or configuration problem");
+        _log(LOG_ERR, "$source: forgery or configuration problem");
         next;
     }
 
