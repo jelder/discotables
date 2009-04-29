@@ -86,7 +86,7 @@ sub render_relayd (@) {
 my %disco;
 
 sub refresh_tables () {
-    print "in refresh_tables\n";
+    _log(LOG_DEBUG,'in refresh_tables');
     for my $table (keys %disco) {
         my @hosts;
         for my $host (keys %{ $disco{$table} } ) {
@@ -98,7 +98,7 @@ sub refresh_tables () {
         }
 
         #render_nginx_fair($table,@hosts);
-        #render_relayd($table,@hosts);
+        render_relayd($table,@hosts);
 
         # Delete the table record if @hosts is empty so next iteration will be a no-op. 
         delete $disco{$table} unless @hosts;
@@ -107,7 +107,10 @@ sub refresh_tables () {
 }
 
 sub hexdump (@) {
-    print s/(.)/sprintf("{%x} ",ord($1))/eg for @_; 
+    for (@_) {
+        s/(.)/sprintf("%x",ord($1))/eg;
+        print;
+    }
 }
 
 # Fork and let the child handle network IO. Parent process reads from a pipe and periodically updates load balancer config files. 
@@ -123,20 +126,61 @@ if (fork) {
     #local $SIG{ALRM} = sub { print STDERR Dumper \%disco; alarm $age };
     alarm $age;
 
-    while (1) {
-        my $buf;
-        next unless READ->sysread($buf, 1024);
-        my ($time, $table, $host)
-            = split / /, $buf;
-        $disco{$table}->{$host} = $time;
-    }
-} else {
-    close READ;
     # Set up our cipher
     my $cipher = Crypt::CBC->new(
         -key    => $key, 
         -cipher => 'Blowfish'
     );
+
+    while (1) {
+        my $frame;
+        next unless READ->sysread($frame, 1024);
+
+        # Data received from child: two bytes for time, four for source, rest is raw packet.
+        my $time_received = unpack('L',substr($frame,0,4,''));
+        my $source = join('.',unpack('C4',substr($frame,0,4,'')));
+
+        # Decrypt using pre-shared key
+        eval {
+            $frame = $cipher->decrypt($frame);
+            # Protocol is plain text, so use that to detect failed decryption.
+            die "incorrect key\n" unless
+                $frame =~ /^[ .0-9a-z_-]+$/io;
+        };
+        if ($@) {
+            # Decrypt failed, log an error with the source IP.
+            _log(LOG_ERR, "$source: $@");
+            next;
+        }
+
+        # Maybe I should use a real serializer here, but this works.
+        my ($time_sent, $table, $host)
+            = split(' ', $frame, 3);
+
+        # Sanity checks on table names.
+        ($table) = ($table =~ /([a-z0-9_-]+)/i);
+        unless (grep { $_ eq $table} @tables) {
+            _log(LOG_ERR, "$source: $table is not allowed");
+            next;
+        }
+        
+        # TODO: $server sanity checking. 
+
+        # Timestamp outside of allowed skew indicates replay attack 
+        # or broken client. 
+        if ($time_sent - $skew >= $time_sent &&
+            $time_sent + $skew <= $time_sent ){
+            _log(LOG_ERR, "$source: forgery or configuration problem");
+            next;
+        }
+
+        $disco{$table}->{$host} = $time_sent;
+    }
+} else {
+    # The child just grabs frame off of the network and sends them up to the parent for processing.
+    # The source and time are also sent (packed) for checking.
+
+    close READ;
 
     # Set up our multicast listener
     my $socket = IO::Socket::Multicast->new(
@@ -145,52 +189,10 @@ if (fork) {
     ) or die $!;
     $socket->mcast_add($announce);
 
-    my $select = new IO::Select( $socket ) 
-        or die $!;
-
-    while (my @ready = $select->can_read) {
-        for my $fh (@ready) {
-            # Grab a frame from the wire
-            my $frame;
-            next unless $socket->recv($frame,1024);
-            my $source = join('.',unpack( "C4", $socket->peeraddr));
-
-            # Decrypt using pre-shared key
-            eval {
-                $frame = $cipher->decrypt($frame);
-                # Protocol is plain text, so use that to detect failed decryption.
-                die "incorrect key\n" unless
-                    $frame =~ /^[ .0-9a-z_-]+$/io;
-            };
-            if ($@) {
-                # Decrypt failed, log an error with the source IP.
-                _log(LOG_ERR, "$source: $@");
-                next;
-            }
-
-            # Maybe I should use a real serializer here, but this works.
-            my ($time_sent, $table, $server)
-                = split(' ', $frame, 3);
-
-            # Sanity checks on table names.
-            ($table) = ($table =~ /([a-z0-9_-]+)/i);
-            unless (grep { $_ eq $table} @tables) {
-                _log(LOG_ERR, "$source: $table is not allowed");
-                next;
-            }
-            
-            # TODO: $server sanity checking. 
-
-            # Timestamp outside of allowed skew indicates replay attack 
-            # or broken client. 
-            if ($time_sent - $skew >= time &&
-                $time_sent + $skew <= time ){
-                _log(LOG_ERR, "$source: forgery or configuration problem");
-                next;
-            }
-
-            WRITE->syswrite(time . " $table $server");
-        }
+    while (1) {
+        my $buffer;
+        next unless $socket->recv($buffer,1024);
+        WRITE->syswrite(pack('L', time) . $socket->peeraddr . $buffer);
     }
 }
 
