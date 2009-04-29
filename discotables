@@ -97,8 +97,8 @@ sub refresh_tables () {
             }
         }
 
-        render_nginx_fair($table,@hosts);
-        render_relayd($table,@hosts);
+        #render_nginx_fair($table,@hosts);
+        #render_relayd($table,@hosts);
 
         # Delete the table record if @hosts is empty so next iteration will be a no-op. 
         delete $disco{$table} unless @hosts;
@@ -106,21 +106,28 @@ sub refresh_tables () {
     alarm $age;
 }
 
+sub hexdump (@) {
+    print s/(.)/sprintf("{%x} ",ord($1))/eg for @_; 
+}
+
 # Fork and let the child handle network IO. Parent process reads from a pipe and periodically updates load balancer config files. 
 
 pipe(READ, WRITE) or die $!;
+WRITE->autoflush(1);
 
 if (fork) {
     close WRITE;
 
     # Wake up every $age seconds to refresh the tables.
     local $SIG{ALRM} = \&refresh_tables;
+    #local $SIG{ALRM} = sub { print STDERR Dumper \%disco; alarm $age };
     alarm $age;
 
-    while (<READ>) {
+    while (1) {
+        my $buf;
+        next unless READ->sysread($buf, 1024);
         my ($time, $table, $host)
-            = split / /, $_;
-        print $_;
+            = split / /, $buf;
         $disco{$table}->{$host} = $time;
     }
 } else {
@@ -182,8 +189,7 @@ if (fork) {
                 next;
             }
 
-            WRITE->printflush(join(' ', time, $table, $server),"\n");
-            WRITE->flush;
+            WRITE->syswrite(time . " $table $server");
         }
     }
 }
