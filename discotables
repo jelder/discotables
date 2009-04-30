@@ -63,12 +63,11 @@ my $disclaimer = <<END;
 #
 
 END
-$disclaimer = '' if $debug;
 
 sub render_nginx_fair (%) {
     my %disco = @_;
     my $conf = '';
-    for my $table (keys %disco) {
+    for my $table (@tables) {
         $conf .= "upstream $table {\n";
         $conf .= "\t$_;\n" for keys %{ $disco{$table} };
         $conf .= "\tfair;\n}\n";
@@ -79,7 +78,7 @@ sub render_nginx_fair (%) {
 sub render_relayd (%) {
     my %disco = @_;
     my $conf = '';
-    for my $table (keys %disco) {
+    for my $table (@tables) {
         $conf .= "table <$table> {\n";
         $conf .= "\t$_\n" for keys %{ $disco{$table} };
         $conf .= "}\n";
