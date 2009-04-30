@@ -150,6 +150,8 @@ my %disco_save;
 
 sub reload () {
     _log(LOG_DEBUG, "in reload()");
+    print STDERR "current: ", Dumper \%disco;
+    print STDERR "previous: ", Dumper \%disco_save;
     my $need_reload = 0;
     for my $table (keys %disco) {
         my @hosts;
@@ -168,6 +170,7 @@ sub reload () {
         # Delete the table record if @hosts is empty so next iteration will be a no-op. 
         delete $disco{$table} unless @hosts;
     }
+    _log(LOG_DEBUG, "need_reload=$need_reload");
     if ($need_reload) {
         handler_nginx(%disco) if grep { $_ eq 'nginx' } @conf_handlers; 
         handler_relay(%disco) if grep { $_ eq 'relay' } @conf_handlers; 
@@ -175,6 +178,7 @@ sub reload () {
     }
     %disco_save = %disco;
     alarm $conf{check_interval};
+    _log(LOG_DEBUG, "out of reload()");
 }
 
 # Fork and let the child handle network IO. Parent process reads from a pipe and periodically updates load balancer config files. 
@@ -199,7 +203,7 @@ if (fork) {
         my $frame;
         next unless READ->sysread($frame, 1024);
 
-        # Data received from child: four bytes for time, four for source, rest is raw packet.
+        # Data received from child: four bytes of time, four of source, remainder is raw packet.
         my $time_received = unpack('L',substr($frame,0,4,''));
         my $source = join('.',unpack('C4',substr($frame,0,4,'')));
 
@@ -275,6 +279,7 @@ sub slurp {
     return $data;
 }
 
+# Leftover from development, might still be useful to have a hex dumper.
 sub hexdump {
     for (@_) {
         s/(.)/sprintf("%x",ord($1))/eg;
@@ -282,6 +287,7 @@ sub hexdump {
     }
 }
 
+# This is used for calling the check and reload scripts.
 sub wrapper {
     my $command = shift;
     my @command = split ' ', $command;
