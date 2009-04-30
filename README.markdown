@@ -11,22 +11,12 @@ It is assumed that your relayd.conf already knows how to judge the health of you
 
 All communication is encrypted with Blowfish and a relies on a pre-shared key. 
 
+A working configuration is presented in example.conf. 
+
 Environment
 -----------
 
 Developed and tested on Ubuntu, Mac OS X, and OpenBSD. Needs a modern Perl and not much else.
-
-Roadmap
-------
-
-Before release:
-
-* Current design only works against pf tables, not relayd. Final version will work against NginX, relayd, or anything with an include statement in the configuration syntax and a graceful reload method. 
-
-Nice to have:
-
-* Directly support ActiveMQ's announcements. Zero security, but could be useful under the right circumstances.
-* Need to write some --help text.
 
 Dependencies
 ------------
@@ -37,5 +27,5 @@ Ubuntu, Debian:
 
 Everyone else: 
 
-`cpan install Crypt::CBC Crypt::Blowfish IO::Socket::Multicast`
+`cpan Crypt::CBC Crypt::Blowfish IO::Socket::Multicast`
 
