@@ -64,7 +64,6 @@ while (<CONF>) {
         };
         default {
             if (grep { $key eq $_ } keys %conf) {
-                print "{$key,$val}\n";
                 $conf{$key} = $val;
             } else {
                 print "Not understood: $_\n";
@@ -111,13 +110,20 @@ sub handler_monitor (%) { my %disco = @_ ; print Dumper \%disco }
 sub handler_nginx (%) {
     my %disco = @_;
     my $conf = '';
-    for my $table (@conf_tables) {
+    for my $table (keys %disco) {
+        # We probably need to do something special to fully support ip_hash.
         $conf .= "upstream $table {\n";
-        $conf .= "\t$_;\n" for keys %{ $disco{$table} };
-        $conf .= "\t$conf{nginx_upstream_mode};\n";
+        $conf .= "\tserver $_;\n" for keys %{ $disco{$table} };
+        $conf .= "\t$conf{nginx_upstream_mode};\n"
+            if $conf{nginx_upstream_mode};
         $conf .= "}\n";
     }
-    return $disclaimer.$conf;
+    open INCLUDE, ">$conf{nginx_include}" or die "$conf{nginx_include}: $!"; 
+    print INCLUDE $disclaimer.$conf;
+    close INCLUDE;
+
+    # Check the syntax and reload.
+    wrapper($conf{nginx_check}) && wrapper($conf{nginx_reload});
 }
 
 sub handler_relay (%) {
@@ -128,7 +134,12 @@ sub handler_relay (%) {
         $conf .= "\t$_\n" for keys %{ $disco{$table} };
         $conf .= "}\n";
     }
-    return $disclaimer.$conf;
+    open INCLUDE, ">$conf{relay_include}" or die "$conf{relay_include}: $!"; 
+    print INCLUDE $disclaimer.$conf;
+    close INCLUDE;
+
+    # Check the syntax and reload.
+    wrapper($conf{relay_check}) && wrapper($conf{relay_reload});
 }
 
 # %disco is our main data structure.
@@ -188,7 +199,7 @@ if (fork) {
         my $frame;
         next unless READ->sysread($frame, 1024);
 
-        # Data received from child: two bytes for time, four for source, rest is raw packet.
+        # Data received from child: four bytes for time, four for source, rest is raw packet.
         my $time_received = unpack('L',substr($frame,0,4,''));
         my $source = join('.',unpack('C4',substr($frame,0,4,'')));
 
@@ -271,3 +282,23 @@ sub hexdump {
     }
 }
 
+sub wrapper {
+    my $command = shift;
+    my @command = split ' ', $command;
+    if (system(@command) == 0) {
+        return 1;
+    } else {
+        my $message;
+        if ($? == -1) {
+            $message = "failed to execute: $!\n";
+        } elsif ($? & 127) {
+            $message = sprintf "child died with signal %d, %s coredump\n",
+                ($? & 127),  ($? & 128) ? 'with' : 'without';
+        } else {
+            $message = sprintf "child exited with value %d\n", $? >> 8;
+        }
+        _log LOG_ERR, $command;
+        _log LOG_ERR, $message;
+        return 0;
+    }
+}
