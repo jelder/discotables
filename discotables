@@ -63,46 +63,59 @@ my $disclaimer = <<END;
 #
 
 END
+$disclaimer = '' if $debug;
 
-sub render_nginx_fair ($@) {
-    my ($table,@hosts) = @_;
-    my $conf = $disclaimer;
-    $conf .= "upstream $table {\n";
-    $conf .= "\t$_;\n" for @hosts;
-    $conf .= "\tfair;\n}\n";
-    print $conf;
+sub render_nginx_fair (%) {
+    my %disco = @_;
+    my $conf = '';
+    for my $table (keys %disco) {
+        $conf .= "upstream $table {\n";
+        $conf .= "\t$_;\n" for keys %{ $disco{$table} };
+        $conf .= "\tfair;\n}\n";
+    }
+    return $disclaimer.$conf;
 }
 
-sub render_relayd (@) {
-    my ($table,@hosts) = @_;
-    my $conf = $disclaimer;
-    $conf .= "table <$table> {\n";
-    $conf .= "\t$_\n" for @hosts;
-    $conf .= "}\n";
-    print $conf;
+sub render_relayd (%) {
+    my %disco = @_;
+    my $conf = '';
+    for my $table (keys %disco) {
+        $conf .= "table <$table> {\n";
+        $conf .= "\t$_\n" for keys %{ $disco{$table} };
+        $conf .= "}\n";
+    }
+    return $disclaimer.$conf;
 }
 
 # %disco is our main data structure.
 my %disco;
 
+# We will compare the current state of %disco to the previous so daemons are only reload when necessary.
+my %disco_save; 
+
 sub refresh_tables () {
-    _log(LOG_DEBUG,'in refresh_tables');
+    my $need_reload = 0;
     for my $table (keys %disco) {
         my @hosts;
         for my $host (keys %{ $disco{$table} } ) {
+            # Schedule a reload if this host wasn't there last time.
+            $need_reload++ unless exists($disco_save{$table}->{$host});
             if ($disco{$table}->{$host} >= time - $age) {
                 push @hosts, $host;
             } else {
                 delete $disco{$table}->{$host};
+                # Schedule a reload since a known host is now missing.
+                $need_reload++;
             }
         }
-
-        #render_nginx_fair($table,@hosts);
-        render_relayd($table,@hosts);
 
         # Delete the table record if @hosts is empty so next iteration will be a no-op. 
         delete $disco{$table} unless @hosts;
     }
+    if ($need_reload) {
+        print render_nginx_fair(%disco),render_relayd(%disco);
+    }
+    %disco_save = %disco;
     alarm $age;
 }
 
@@ -177,8 +190,7 @@ if (fork) {
         $disco{$table}->{$host} = $time_sent;
     }
 } else {
-    # The child just grabs frame off of the network and sends them up to the parent for processing.
-    # The source and time are also sent (packed) for checking.
+    # The child just grabs frame off of the network and sends them up to the parent for processing. The source and time are also sent (packed) for checking.
 
     close READ;
 
