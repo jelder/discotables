@@ -186,7 +186,8 @@ if (fork) {
             _log(LOG_ERR, "$source: forgery or configuration problem");
             next;
         }
-
+        
+        # Save tuple of table, host and time for later processing by update_tables.
         $disco{$table}->{$host} = $time_sent;
     }
 } else {
