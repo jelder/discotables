@@ -27,6 +27,8 @@ my %conf = (
     nginx_include => "/var/run/discotables.nginx.conf",
     nginx_check => "nginx -t",
     nginx_reload => "invoke-rc.d nginx reload",
+    nginx_port => '80',
+    nginx_extra => '',
     relay_include => "/var/run/discotables.relay.conf",
     relay_check => "relayd -n",
     relay_reload => "relayctl reload",
@@ -203,10 +205,12 @@ sub handler_monitor { my %disco = @_ ; print Dumper \%disco }
 sub handler_nginx {
     my %disco = @_;
     my $conf = '';
+    my $extra = $conf{nginx_extra} || '';
+    my $port = $conf{nginx_port};
     for my $table (keys %disco) {
         # We probably need to do something special to fully support ip_hash.
         $conf .= "upstream $table {\n";
-        $conf .= "\tserver $_;\n" for keys %{ $disco{$table} };
+        $conf .= "\tserver $_:$port $extra;\n" for keys %{ $disco{$table} };
         $conf .= "\t$conf{nginx_upstream_mode};\n"
             if $conf{nginx_upstream_mode};
         $conf .= "}\n";
