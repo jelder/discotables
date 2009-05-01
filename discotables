@@ -281,30 +281,40 @@ sub command_wrapper {
 sub reload {
     _log(LOG_DEBUG, "in reload()");
     my $need_reload = 0;
+
     for my $table (keys %disco) {
         my @hosts;
         for my $host (keys %{ $disco{$table} } ) {
             if ($disco{$table}->{$host} >= time - $conf{heartbeat_expire}) {
-                # Schedule a reload if this host wasn't there last time.
-                $need_reload++ unless exists($disco_save{$table}->{$host});
+                
+                # Schedule a reload, since this host wasn't active last time.
+                $need_reload++ unless grep { $_ eq $host} @{ $disco_save{$table} };
+
+                # This host is still good, so add it to the list.
                 push @hosts, $host;
+
             } else {
+
+                # No heartbeat, so delete the host from the table.
                 delete $disco{$table}->{$host};
+
                 # Schedule a reload since a known host is now missing.
                 $need_reload++;
             }
         }
 
+        # Save a record of what we discovered this time.
+        $disco_save{$table} = [@hosts];
+
         # Delete the table record if @hosts is empty so next iteration will be a no-op. 
         delete $disco{$table} unless @hosts;
+
     }
-    _log(LOG_DEBUG, "need_reload = $need_reload");
     if ($need_reload) {
         handler_nginx(%disco) if grep { $_ eq 'nginx' } @conf_handlers; 
         handler_relay(%disco) if grep { $_ eq 'relay' } @conf_handlers; 
         handler_monitor(%disco) if grep { $_ eq 'monitor' } @conf_handlers; 
     }
-    %disco_save = %disco;
     alarm $conf{check_interval};
 }
 
