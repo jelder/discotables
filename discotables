@@ -105,79 +105,11 @@ my $disclaimer = <<END;
 
 END
 
-sub handler_monitor (%) { my %disco = @_ ; print Dumper \%disco }
-
-sub handler_nginx (%) {
-    my %disco = @_;
-    my $conf = '';
-    for my $table (keys %disco) {
-        # We probably need to do something special to fully support ip_hash.
-        $conf .= "upstream $table {\n";
-        $conf .= "\tserver $_;\n" for keys %{ $disco{$table} };
-        $conf .= "\t$conf{nginx_upstream_mode};\n"
-            if $conf{nginx_upstream_mode};
-        $conf .= "}\n";
-    }
-    open INCLUDE, ">$conf{nginx_include}" or die "$conf{nginx_include}: $!"; 
-    print INCLUDE $disclaimer.$conf;
-    close INCLUDE;
-
-    # Check the syntax and reload.
-    wrapper($conf{nginx_check}) && wrapper($conf{nginx_reload});
-}
-
-sub handler_relay (%) {
-    my %disco = @_;
-    my $conf = '';
-    for my $table (@conf_tables) {
-        $conf .= "table <$table> {\n";
-        $conf .= "\t$_\n" for keys %{ $disco{$table} };
-        $conf .= "}\n";
-    }
-    open INCLUDE, ">$conf{relay_include}" or die "$conf{relay_include}: $!"; 
-    print INCLUDE $disclaimer.$conf;
-    close INCLUDE;
-
-    # Check the syntax and reload.
-    wrapper($conf{relay_check}) && wrapper($conf{relay_reload});
-}
-
 # %disco is our main data structure.
 my %disco;
 
 # We will compare the current state of %disco to the previous so daemons are only reload when necessary.
 my %disco_save; 
-
-sub reload () {
-    _log(LOG_DEBUG, "in reload()");
-    my $need_reload = 0;
-    for my $table (keys %disco) {
-        my @hosts;
-        for my $host (keys %{ $disco{$table} } ) {
-            if ($disco{$table}->{$host} >= time - $conf{heartbeat_expire}) {
-                # Schedule a reload if this host wasn't there last time.
-                $need_reload++ unless exists($disco_save{$table}->{$host});
-                push @hosts, $host;
-            } else {
-                delete $disco{$table}->{$host};
-                # Schedule a reload since a known host is now missing.
-                $need_reload++;
-            }
-        }
-
-        # Delete the table record if @hosts is empty so next iteration will be a no-op. 
-        delete $disco{$table} unless @hosts;
-    }
-    _log(LOG_DEBUG, "need_reload=$need_reload");
-    if ($need_reload) {
-        handler_nginx(%disco) if grep { $_ eq 'nginx' } @conf_handlers; 
-        handler_relay(%disco) if grep { $_ eq 'relay' } @conf_handlers; 
-        handler_monitor(%disco) if grep { $_ eq 'monitor' } @conf_handlers; 
-    }
-    %disco_save = %disco;
-    alarm $conf{check_interval};
-    _log(LOG_DEBUG, "out of reload()");
-}
 
 # Fork and let the child handle network IO. Parent process reads from a pipe and periodically updates load balancer config files. 
 
@@ -205,7 +137,7 @@ if (fork) {
         my $time_received = unpack('L',substr($frame,0,4,''));
         my $source = join('.',unpack('C4',substr($frame,0,4,'')));
 
-        print length($frame) . " bytes from $source\n" if $debug;
+        #print length($frame) . " bytes from $source\n" if $debug;
 
         # Decrypt using pre-shared key
         eval {
@@ -265,6 +197,44 @@ if (fork) {
     }
 }
 
+# Handler functions
+sub handler_monitor { my %disco = @_ ; print Dumper \%disco }
+
+sub handler_nginx {
+    my %disco = @_;
+    my $conf = '';
+    for my $table (keys %disco) {
+        # We probably need to do something special to fully support ip_hash.
+        $conf .= "upstream $table {\n";
+        $conf .= "\tserver $_;\n" for keys %{ $disco{$table} };
+        $conf .= "\t$conf{nginx_upstream_mode};\n"
+            if $conf{nginx_upstream_mode};
+        $conf .= "}\n";
+    }
+    open INCLUDE, ">$conf{nginx_include}" or die "$conf{nginx_include}: $!"; 
+    print INCLUDE $disclaimer.$conf;
+    close INCLUDE;
+
+    # Check the syntax and reload.
+    command_wrapper($conf{nginx_check}) && command_wrapper($conf{nginx_reload});
+}
+
+sub handler_relay {
+    my %disco = @_;
+    my $conf = '';
+    for my $table (@conf_tables) {
+        $conf .= "table <$table> {\n";
+        $conf .= "\t$_\n" for keys %{ $disco{$table} };
+        $conf .= "}\n";
+    }
+    open INCLUDE, ">$conf{relay_include}" or die "$conf{relay_include}: $!"; 
+    print INCLUDE $disclaimer.$conf;
+    close INCLUDE;
+
+    # Check the syntax and reload.
+    command_wrapper($conf{relay_check}) && command_wrapper($conf{relay_reload});
+}
+
 
 # Helper function for reading the key from a file.
 sub slurp {
@@ -286,7 +256,7 @@ sub hexdump {
 }
 
 # This is used for calling the check and reload scripts.
-sub wrapper {
+sub command_wrapper {
     my $command = shift;
     my @command = split ' ', $command;
     if (system(@command) == 0) {
@@ -306,3 +276,35 @@ sub wrapper {
         return 0;
     }
 }
+
+# This gets called every $check_interval seconds and is pretty much where the magick happens.
+sub reload {
+    _log(LOG_DEBUG, "in reload()");
+    my $need_reload = 0;
+    for my $table (keys %disco) {
+        my @hosts;
+        for my $host (keys %{ $disco{$table} } ) {
+            if ($disco{$table}->{$host} >= time - $conf{heartbeat_expire}) {
+                # Schedule a reload if this host wasn't there last time.
+                $need_reload++ unless exists($disco_save{$table}->{$host});
+                push @hosts, $host;
+            } else {
+                delete $disco{$table}->{$host};
+                # Schedule a reload since a known host is now missing.
+                $need_reload++;
+            }
+        }
+
+        # Delete the table record if @hosts is empty so next iteration will be a no-op. 
+        delete $disco{$table} unless @hosts;
+    }
+    _log(LOG_DEBUG, "need_reload = $need_reload");
+    if ($need_reload) {
+        handler_nginx(%disco) if grep { $_ eq 'nginx' } @conf_handlers; 
+        handler_relay(%disco) if grep { $_ eq 'relay' } @conf_handlers; 
+        handler_monitor(%disco) if grep { $_ eq 'monitor' } @conf_handlers; 
+    }
+    %disco_save = %disco;
+    alarm $conf{check_interval};
+}
+
