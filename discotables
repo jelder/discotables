@@ -150,15 +150,13 @@ my %disco_save;
 
 sub reload () {
     _log(LOG_DEBUG, "in reload()");
-    print STDERR "current: ", Dumper \%disco;
-    print STDERR "previous: ", Dumper \%disco_save;
     my $need_reload = 0;
     for my $table (keys %disco) {
         my @hosts;
         for my $host (keys %{ $disco{$table} } ) {
-            # Schedule a reload if this host wasn't there last time.
-            $need_reload++ unless exists($disco_save{$table}->{$host});
             if ($disco{$table}->{$host} >= time - $conf{heartbeat_expire}) {
+                # Schedule a reload if this host wasn't there last time.
+                $need_reload++ unless exists($disco_save{$table}->{$host});
                 push @hosts, $host;
             } else {
                 delete $disco{$table}->{$host};
