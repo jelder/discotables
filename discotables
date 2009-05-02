@@ -212,7 +212,7 @@ sub handler_monitor { my %disco = @_ ; print Dumper \%disco }
 
 sub handler_nginx {
     my %disco = @_;
-    my $conf;
+    my $conf = '';
     for my $table (keys %disco) {
         $conf .= "upstream $table {\n";
 
