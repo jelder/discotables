@@ -4,7 +4,7 @@
 use strict;
 use warnings;
 
-use Getopt::Long;
+use Getopt::Long qw(:config pass_through);
 use Switch 'Perl6';
 use IO::Socket::Multicast;
 use IO::Handle;
@@ -26,7 +26,7 @@ $PROGRAM_NAME = basename $PROGRAM_NAME;
 openlog $PROGRAM_NAME, "ndelay,console,nowaitpid", LOG_DAEMON or die $!;
 setlogsock 'unix';
 
-# The following are all valid in configuration a file or on the command line.
+# Set up some defaults. The following are all valid in configuration a file or on the command line.
 my %conf = (
     # general options
     iface => '',
@@ -48,7 +48,7 @@ my %conf = (
     allowed_tables => [],
     allowed_netmasks => [],
     allowed_clock_skew => 10,
-    heartbeat_expire => 10,
+    heartbeat_expire => 5,
     handlers => [],
 
     # host agent options
@@ -57,43 +57,23 @@ my %conf = (
 );
 
 # If we're being passed a configuration file, read in its contents, but then allow further command line arguments to override them.
-if (-f $ARGV[0]) {
-    open CONF, $ARGV[0] or die $ARGV[0] . ":$!\n";
-    while (<CONF>) {
-        chomp;
-        next unless /^(\w+)\s+(.+)/;
-        my ($key, $val) = ($1, $2);
-        given ($key) {
-            when 'keyfile'  { $conf{key} = slurp($val) };
-            when 'table'    { push @{ $conf{allowed_tables} }, $val };
-            when 'netmask'  { push @{ $conf{allowed_netmasks} }, $val };
-            when 'handler'  {
-                if (grep { $_ eq $val } qw(nginx relay monitor)) {
-                    push @{ $conf{handlers} }, $val;
-                } else {
-                    print "There is no handler called $val (yet).\n";
-                    exit 75;
-                }
-            };
-            default {
-                if (grep { $key eq $_ } keys %conf) {
-                    $conf{$key} = $val;
-                } else {
-                    print "Not understood: $_\n";
-                    exit 75;
-                }
-            }
-        }
-    }
-    close CONF;
-}
+my $conf_file;
+GetOptions(
+    'file|f=s' => \$conf_file,
+) or die $!;
+
+if (defined($conf_file) && -f $conf_file) {
+    %conf = %{ eval slurp($conf_file) }
+} 
 
 GetOptions(
     \%conf,
     qw(
         debug|d!
+        allowed_tables=s@
+        handlers=s@
     ),
-    map { $_ .= '=s' } keys %conf,
+    map { $_ .= '=s' } keys %conf
 ) or die $!;
 
 die "no tables?\n" unless ($conf{allowed_tables});
