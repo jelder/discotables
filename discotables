@@ -101,7 +101,7 @@ END
 # %disco is our main data structure.
 my %disco;
 
-# We will compare the current state of %disco to the previous so daemons are only reload when necessary.
+# %disco_save exists so we can detect when a host has just become available.
 my %disco_save; 
 
 # Fork and let the child handle network IO. Parent process reads from a pipe and periodically updates load balancer config files. 
@@ -167,7 +167,7 @@ if (fork) {
         }
         
         # Save tuple of table, host and time for later processing by update_tables.
-        $disco{$table}->{$host} = $time_sent;
+        $disco{$table}{$host}{timestamp} = $time_sent;
     }
 } else {
     # The child just grabs frame off of the network and sends them up to the parent for processing. The source and time are also sent (packed) for checking.
@@ -288,7 +288,7 @@ sub reload {
     for my $table (keys %disco) {
         my @hosts;
         for my $host (keys %{ $disco{$table} } ) {
-            if ($disco{$table}->{$host} >= time - $conf{heartbeat_expire}) {
+            if ($disco{$table}{$host}{timestamp} >= time - $conf{heartbeat_expire}) {
                 
                 # Schedule a reload, since this host wasn't active last time.
                 $need_reload++ unless grep { $_ eq $host} @{ $disco_save{$table} };
@@ -299,7 +299,7 @@ sub reload {
             } else {
 
                 # No heartbeat, so delete the host from the table.
-                delete $disco{$table}->{$host};
+                delete $disco{$table}{$host};
 
                 # Schedule a reload since a known host is now missing.
                 $need_reload++;
