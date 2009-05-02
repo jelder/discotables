@@ -132,16 +132,16 @@ if (fork) {
         my $buffer;
         next unless READ->sysread($buffer, 1024);
         my ($time_received, $source, $payload) = @{ thaw($buffer) };
+        $source = join('.',unpack('C4',$source)); 
 
         # Decrypt using pre-shared key
-        my %heartbeat = ();
+        my %heartbeat;
         eval {
-            %heartbeat = %{ thaw($cipher->decrypt($payload)) }
-                or die "incorrect key\n";
+            %heartbeat = %{ thaw($cipher->decrypt($payload)) };
         };
         if ($@) {
             # Decrypt failed, log an error with the source IP.
-            _log(LOG_ERR, "$source: $@");
+            _log(LOG_ERR, "$source: incorrect key? ($@)");
             next;
         }
 
