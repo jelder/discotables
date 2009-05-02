@@ -1,9 +1,12 @@
 #!/usr/bin/perl
+# DiscoTables means control of load balancer tables via multicast discovery. 
+# GPL Jacob Elder <jacob.elder@gmail.com> 02009-04-26
 use strict;
 use warnings;
 
 use Getopt::Long;
 use Switch 'Perl6';
+use MIME::Base64;
 use IO::Socket::Multicast;
 use IO::Select;
 use IO::Handle;
@@ -12,6 +15,8 @@ use File::Basename;
 use English '-no_match_vars';
 use Sys::Syslog qw( :standard :macros setlogsock );
 use Data::Dumper;
+$Data::Dumper::Terse=1;
+$Data::Dumper::Indent=1;
 
 $PROGRAM_NAME = basename $PROGRAM_NAME;
 openlog $PROGRAM_NAME, "ndelay,console,nowaitpid", LOG_DAEMON or die $!;
@@ -24,11 +29,11 @@ my %conf = (
     check_interval => 1,
     heartbeat_expire => 10,
     allowed_clock_skew => 10,
+    allow_port => 1,
+    allow_extra => 1,
     nginx_include => "/var/run/discotables.nginx.conf",
     nginx_check => "nginx -t",
     nginx_reload => "invoke-rc.d nginx reload",
-    nginx_port => '80',
-    nginx_extra => '',
     relay_include => "/var/run/discotables.relay.conf",
     relay_check => "relayd -n",
     relay_reload => "relayctl reload",
@@ -101,8 +106,8 @@ END
 # %disco is our main data structure.
 my %disco;
 
-# %disco_save exists so we can detect when a host has just become available.
-my %disco_save; 
+# %state exists so we can detect when a host has just become available.
+my %state; 
 
 # Fork and let the child handle network IO. Parent process reads from a pipe and periodically updates load balancer config files. 
 
@@ -130,8 +135,6 @@ if (fork) {
         my $time_received = unpack('L',substr($frame,0,4,''));
         my $source = join('.',unpack('C4',substr($frame,0,4,'')));
 
-        #print length($frame) . " bytes from $source\n" if $debug;
-
         # Decrypt using pre-shared key
         eval {
             $frame = $cipher->decrypt($frame);
@@ -146,8 +149,8 @@ if (fork) {
         }
 
         # Maybe I should use a real serializer here, but this works.
-        my ($time_sent, $table, $host)
-            = split(' ', $frame, 3);
+        my ($time_sent, $table, $host, $port, $extra)
+            = split(' ', $frame);
 
         # Sanity checks on table names.
         ($table) = ($table =~ /([a-z0-9_-]+)/i);
@@ -165,6 +168,12 @@ if (fork) {
             _log(LOG_ERR, "$source: forgery or configuration problem");
             next;
         }
+
+        $disco{$table}{$host}{port} = $port
+            if $port && $conf{allow_port};
+
+        $disco{$table}{$host}{extra} = decode_base64($extra)
+            if $extra && $conf{allow_extra};
         
         # Save tuple of table, host and time for later processing by update_tables.
         $disco{$table}{$host}{timestamp} = $time_sent;
@@ -203,15 +212,28 @@ sub handler_monitor { my %disco = @_ ; print Dumper \%disco }
 
 sub handler_nginx {
     my %disco = @_;
-    my $conf = '';
-    my $extra = $conf{nginx_extra} || '';
-    my $port = $conf{nginx_port};
+    my $conf;
     for my $table (keys %disco) {
-        # We probably need to do something special to fully support ip_hash.
         $conf .= "upstream $table {\n";
-        $conf .= "\tserver $_:$port $extra;\n" for keys %{ $disco{$table} };
+
+        for my $host (keys %{ $disco{$table} }) {
+            my @fields = ("\tserver ", $host);
+
+            # Add the port if we have it.
+            $fields[1] .= ':' . $disco{$table}{$host}{port}
+                if exists $disco{$table}{$host}{port};
+
+            # Add the extra fields if we have them.
+            push @fields, $disco{$table}{$host}{extra}
+                if exists $disco{$table}{$host}{extra};
+
+            $conf .= join(' ', @fields) . ";\n";
+        }
+
+        # We probably need to do something special to fully support ip_hash.
         $conf .= "\t$conf{nginx_upstream_mode};\n"
             if $conf{nginx_upstream_mode};
+
         $conf .= "}\n";
     }
     open INCLUDE, ">$conf{nginx_include}" or die "$conf{nginx_include}: $!"; 
@@ -291,7 +313,7 @@ sub reload {
             if ($disco{$table}{$host}{timestamp} >= time - $conf{heartbeat_expire}) {
                 
                 # Schedule a reload, since this host wasn't active last time.
-                $need_reload++ unless grep { $_ eq $host} @{ $disco_save{$table} };
+                $need_reload++ unless grep { $_ eq $host} @{ $state{$table} };
 
                 # This host is still good, so add it to the list.
                 push @hosts, $host;
@@ -307,7 +329,7 @@ sub reload {
         }
 
         # Save a record of what we discovered this time.
-        $disco_save{$table} = [@hosts];
+        $state{$table} = [@hosts];
 
         # Delete the table record if @hosts is empty so next iteration will be a no-op. 
         delete $disco{$table} unless @hosts;
