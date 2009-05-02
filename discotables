@@ -6,9 +6,7 @@ use warnings;
 
 use Getopt::Long;
 use Switch 'Perl6';
-use MIME::Base64;
 use IO::Socket::Multicast;
-use IO::Select;
 use IO::Handle;
 use Crypt::CBC;
 use File::Basename;
@@ -21,7 +19,7 @@ $Data::Dumper::Indent=1;
 
 $PROGRAM_NAME = basename $PROGRAM_NAME;
 openlog $PROGRAM_NAME, "ndelay,console,nowaitpid", LOG_DAEMON or die $!;
-setlogsock 'unix' if $OSNAME eq 'openbsd';
+setlogsock 'unix';
 
 # Configuration parameters with defaults. When adding new configuration parameters, add it here, even with a null default so the parser won't discard it.
 my %conf = (
@@ -45,10 +43,12 @@ my (@conf_tables,@conf_netmasks,@conf_handlers);
 
 my $conf_file;
 my $debug = 0;
+my $iface;
 
 GetOptions(
     'f|c|conf=s' => \$conf_file,
     'd|debug!' => \$debug,
+    'iface=s' => \$iface,
 ) or die $!;
 
 die "--conf is required\n" unless $conf_file; 
@@ -182,6 +182,7 @@ if (fork) {
         LocalPort => $conf{announce_port},
         ReuseAddr => 1,
     ) or die $!;
+    $socket->mcast_if($iface) if $iface;
     $socket->mcast_add($conf{announce_addr});
 
     while (1) {
