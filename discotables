@@ -14,6 +14,7 @@ use Crypt::CBC;
 use File::Basename;
 use English '-no_match_vars';
 use Sys::Syslog qw( :standard :macros setlogsock );
+use Storable qw(nfreeze thaw);
 use Data::Dumper;
 $Data::Dumper::Terse=1;
 $Data::Dumper::Indent=1;
@@ -128,19 +129,18 @@ if (fork) {
     );
 
     while (1) {
-        my $frame;
-        next unless READ->sysread($frame, 1024);
+        my $buffer;
+        next unless READ->sysread($buffer, 1024);
 
         # Data received from child: four bytes of time, four of source, remainder is raw packet.
-        my $time_received = unpack('L',substr($frame,0,4,''));
-        my $source = join('.',unpack('C4',substr($frame,0,4,'')));
+        my $time_received = unpack('L',substr($buffer,0,4,''));
+        my $source = join('.',unpack('C4',substr($buffer,0,4,'')));
 
         # Decrypt using pre-shared key
+        my %heartbeat = ();
         eval {
-            $frame = $cipher->decrypt($frame);
-            # Protocol is plain text, so use that to detect failed decryption.
-            die "incorrect key\n" unless
-                $frame =~ /^[ .0-9a-z_-]+$/io;
+            %heartbeat = %{ thaw($cipher->decrypt($buffer)) }
+                or die "incorrect key\n";
         };
         if ($@) {
             # Decrypt failed, log an error with the source IP.
@@ -148,14 +148,9 @@ if (fork) {
             next;
         }
 
-        # Maybe I should use a real serializer here, but this works.
-        my ($time_sent, $table, $host, $port, $extra)
-            = split(' ', $frame);
-
         # Sanity checks on table names.
-        ($table) = ($table =~ /([a-z0-9_-]+)/i);
-        unless (grep { $_ eq $table} @conf_tables) {
-            _log(LOG_ERR, "$source: $table is not allowed");
+        unless (grep { $_ eq $heartbeat{table} } @conf_tables) {
+            _log(LOG_ERR, "$source: $heartbeat{table} is not allowed");
             next;
         }
         
@@ -163,20 +158,21 @@ if (fork) {
 
         # Timestamp outside of allowed skew indicates replay attack 
         # or broken client. 
-        if ($time_sent - $conf{allowed_clock_skew} >= $time_sent &&
-            $time_sent + $conf{allowed_clock_skew} <= $time_sent ){
+        if ($heartbeat{timestamp} - $conf{allowed_clock_skew} >= $time_received &&
+            $heartbeat{timestamp} + $conf{allowed_clock_skew} <= $time_received ){
             _log(LOG_ERR, "$source: forgery or configuration problem");
             next;
         }
 
-        $disco{$table}{$host}{port} = $port
-            if $port && $conf{allow_port};
+        # Port and Extra are optional.
+        $disco{ $heartbeat{table} }{ $heartbeat{host} }{port} = $heartbeat{port}
+            if exists($heartbeat{port}) && $conf{allow_port};
+        $disco{ $heartbeat{table} }{ $heartbeat{host} }{extra} = $heartbeat{extra}
+            if exists($heartbeat{extra}) && $conf{allow_extra};
 
-        $disco{$table}{$host}{extra} = decode_base64($extra)
-            if $extra && $conf{allow_extra};
         
         # Save tuple of table, host and time for later processing by update_tables.
-        $disco{$table}{$host}{timestamp} = $time_sent;
+        $disco{ $heartbeat{table} }{ $heartbeat{host} }{timestamp} = $heartbeat{timestamp};
     }
 } else {
     # The child just grabs frame off of the network and sends them up to the parent for processing. The source and time are also sent (packed) for checking.
