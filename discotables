@@ -131,15 +131,12 @@ if (fork) {
     while (1) {
         my $buffer;
         next unless READ->sysread($buffer, 1024);
-
-        # Data received from child: four bytes of time, four of source, remainder is raw packet.
-        my $time_received = unpack('L',substr($buffer,0,4,''));
-        my $source = join('.',unpack('C4',substr($buffer,0,4,'')));
+        my ($time_received, $source, $payload) = @{ thaw($buffer) };
 
         # Decrypt using pre-shared key
         my %heartbeat = ();
         eval {
-            %heartbeat = %{ thaw($cipher->decrypt($buffer)) }
+            %heartbeat = %{ thaw($cipher->decrypt($payload)) }
                 or die "incorrect key\n";
         };
         if ($@) {
@@ -169,10 +166,9 @@ if (fork) {
             if exists($heartbeat{port}) && $conf{allow_port};
         $disco{ $heartbeat{table} }{ $heartbeat{host} }{extra} = $heartbeat{extra}
             if exists($heartbeat{extra}) && $conf{allow_extra};
-
         
-        # Save tuple of table, host and time for later processing by update_tables.
-        $disco{ $heartbeat{table} }{ $heartbeat{host} }{timestamp} = $heartbeat{timestamp};
+        # Lastly, save the timestamp. This is the most important bit, right? 
+        $disco{ $heartbeat{table} }{ $heartbeat{host} }{timestamp} = $time_received;
     }
 } else {
     # The child just grabs frame off of the network and sends them up to the parent for processing. The source and time are also sent (packed) for checking.
@@ -191,7 +187,7 @@ if (fork) {
     while (1) {
         my $buffer;
         next unless $socket->recv($buffer,1024);
-        WRITE->syswrite(pack('L', time) . $socket->peeraddr . $buffer);
+        WRITE->syswrite(nfreeze([time, $socket->peeraddr, $buffer]));
     }
 }
 
